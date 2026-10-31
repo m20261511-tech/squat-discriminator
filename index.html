@@ -318,18 +318,6 @@
         color: var(--warning);
       }
 
-      .sr-only {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        padding: 0;
-        margin: -1px;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        white-space: nowrap;
-        border: 0;
-      }
-
       input[type="file"] {
         display: none;
       }
@@ -385,7 +373,6 @@
         <input id="imageInput" type="file" accept="image/*" />
       </div>
 
-      <!-- 모델 준비 상태를 사용자에게 보여주는 영역입니다. -->
       <div id="modelStatus" class="status-box" aria-live="polite">AI 모델을 준비하고 있어요!</div>
 
       <div class="media-area">
@@ -433,13 +420,12 @@
       </div>
     </div>
 
-    <!-- Teachable Machine의 공식 라이브러리 스크립트입니다. 제공된 스크립트가 없어서 표준 버전을 사용합니다. -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/image.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@latest/dist/pose.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/image.min.js"></script>
 
     <script>
-      // 사용자 사진/카메라 입력을 저장하고 상태를 관리하는 변수들입니다.
+      // 모델 파일과 사용자 입력 상태를 관리하는 기본 설정입니다.
       const modelStatus = document.getElementById('modelStatus');
       const uploadBtn = document.getElementById('uploadBtn');
       const imageInput = document.getElementById('imageInput');
@@ -464,58 +450,107 @@
 
       const MODEL_URL = './model.json';
       const METADATA_URL = './metadata.json';
+
       let model = null;
-      let modelType = 'image';
-      let selectedSource = null; // 'upload' 또는 'camera'
+      let modelType = 'pose';
       let currentPreviewSrc = null;
       let videoStream = null;
-      let cameraMode = 'environment';
+      let labels = [];
+      let isModelLoaded = false;
 
-      // 메타데이터에 있는 실제 클래스 이름을 기반으로 결과를 해석합니다.
-      // 실제 모델의 라벨이 다르더라도 이름을 읽어 유사한 키워드로 매칭합니다.
-      function normalizeLabel(label) {
-        if (!label) return '';
-        return String(label).trim().toLowerCase().replace(/\s+/g, '');
+      // 실제 메타데이터의 클래스 이름을 읽어서, 학생이 보기에 맞는 결과 문구를 정확하게 연결합니다.
+      function normalizeText(value) {
+        return String(value || '')
+          .toLowerCase()
+          .replace(/[^가-힣a-z0-9]/g, '')
+          .trim();
       }
 
-      function classCategoryFromLabel(rawLabel, labels = []) {
-        const label = normalizeLabel(rawLabel);
-        const candidates = labels.map(normalizeLabel);
+      function getCategoryFromLabel(rawLabel) {
+        const label = normalizeText(rawLabel);
 
-        if (!label && candidates.length === 0) {
-          return { category: 'unknown', detail: 'unknown' };
-        }
+        if (!label) return 'unknown';
 
-        // 실제로는 metadata.json의 라벨을 우선 검토해 해당 클래스가 어떤 카테고리에 속하는지 판단합니다.
-        if (label.includes('올바른') || label.includes('정상') || label.includes('correct')) {
-          return { category: 'correct', detail: 'correct' };
-        }
-        if ((label.includes('허리') && label.includes('말림')) || (label.includes('허리') && label.includes('굽')) || (label.includes('허리') && label.includes('펴')) || label.includes('back')) {
-          return { category: 'bad_back', detail: '허리 말림' };
-        }
-        if (label.includes('벗윙크') || label.includes('buttwink') || label.includes('버트윙크') || (label.includes('엉덩이') && label.includes('낮')) || label.includes('hip')) {
-          return { category: 'bad_buttwink', detail: '벗윙크' };
-        }
-        if ((label.includes('무릎') && label.includes('모임')) || label.includes('kneecollapse') || label.includes('무릎모임') || (label.includes('무릎') && label.includes('안쪽'))) {
-          return { category: 'bad_knee', detail: '무릎모임' };
+        // 올바른 스쿼트 관련 라벨을 실제 메타데이터 이름에 맞게 인식합니다.
+        if (
+          label.includes('올바른') ||
+          label.includes('correct') ||
+          label.includes('good') ||
+          label.includes('정상') ||
+          label.includes('바른')
+        ) {
+          return 'correct';
         }
 
-        // 라벨이 예상 목록과 완전히 다르더라도 유사 키워드로 비슷한 분류를 찾습니다.
-        const text = candidates.join('|').toLowerCase();
-        if (text.includes('올바른') || text.includes('정상')) {
-          return { category: 'correct', detail: 'correct' };
-        }
-        if (text.includes('허리') && text.includes('말림')) {
-          return { category: 'bad_back', detail: '허리 말림' };
-        }
-        if (text.includes('벗윙크')) {
-          return { category: 'bad_buttwink', detail: '벗윙크' };
-        }
-        if (text.includes('무릎') && text.includes('모임')) {
-          return { category: 'bad_knee', detail: '무릎모임' };
+        // 잘못된 스쿼트(허리 말림)
+        if (
+          (label.includes('허리') && (label.includes('말림') || label.includes('굽') || label.includes('뒤틀') || label.includes('굽음') || label.includes('짐')) ) ||
+          label.includes('backbend') ||
+          label.includes('bentback') ||
+          label.includes('upperback') ||
+          label.includes('badback')
+        ) {
+          return 'bad_back';
         }
 
-        return { category: 'unknown', detail: rawLabel || 'unknown' };
+        // 잘못된 스쿼트(벗윙크)
+        if (
+          label.includes('벗윙크') ||
+          label.includes('buttwink') ||
+          label.includes('버트윙크') ||
+          label.includes('hipwink') ||
+          (label.includes('엉덩') && label.includes('내려')) ||
+          (label.includes('엉덩') && label.includes('아래'))
+        ) {
+          return 'bad_buttwink';
+        }
+
+        // 잘못된 스쿼트(무릎모임)
+        if (
+          (label.includes('무릎') && (label.includes('모임') || label.includes('안쪽') || label.includes('모이는'))) ||
+          label.includes('kneecollapse') ||
+          label.includes('kneein') ||
+          label.includes('kneemod') ||
+          label.includes('kneeinward')
+        ) {
+          return 'bad_knee';
+        }
+
+        // 메타데이터의 실제 라벨 목록 안에서 비슷한 패턴을 찾는 보조 로직도 함께 사용합니다.
+        if (labels.length) {
+          for (const candidate of labels) {
+            const candidateNorm = normalizeText(candidate);
+            if (!candidateNorm) continue;
+            if (
+              candidateNorm.includes('올바른') ||
+              candidateNorm.includes('correct') ||
+              candidateNorm.includes('good')
+            ) {
+              return 'correct';
+            }
+            if (
+              (candidateNorm.includes('허리') && (candidateNorm.includes('말림') || candidateNorm.includes('굽'))) ||
+              candidateNorm.includes('backbend')
+            ) {
+              return 'bad_back';
+            }
+            if (
+              candidateNorm.includes('벗윙크') ||
+              candidateNorm.includes('buttwink') ||
+              candidateNorm.includes('hipwink')
+            ) {
+              return 'bad_buttwink';
+            }
+            if (
+              (candidateNorm.includes('무릎') && (candidateNorm.includes('모임') || candidateNorm.includes('안쪽'))) ||
+              candidateNorm.includes('kneecollapse')
+            ) {
+              return 'bad_knee';
+            }
+          }
+        }
+
+        return 'unknown';
       }
 
       function setModelStatus(text, type = '') {
@@ -526,11 +561,7 @@
       }
 
       function updateAnalyzeButton() {
-        if (!currentPreviewSrc) {
-          analyzeBtn.disabled = true;
-          return;
-        }
-        analyzeBtn.disabled = false;
+        analyzeBtn.disabled = !currentPreviewSrc || !isModelLoaded;
       }
 
       function showPreviewImage(src) {
@@ -540,6 +571,7 @@
         previewEmpty.classList.add('hidden');
         resultPanel.classList.add('hidden');
         feedbackBox.classList.add('hidden');
+        resetBtn.classList.add('hidden');
         updateAnalyzeButton();
       }
 
@@ -548,11 +580,13 @@
         previewImage.classList.add('hidden');
         previewEmpty.classList.remove('hidden');
         currentPreviewSrc = null;
+        resultPanel.classList.add('hidden');
+        feedbackBox.classList.add('hidden');
+        resetBtn.classList.add('hidden');
         updateAnalyzeButton();
       }
 
-      function resetResultPanel() {
-        resultPanel.classList.add('hidden');
+      function setResultDefaults() {
         resultTitle.textContent = '결과';
         resultTitle.className = 'result-good';
         resultDescription.textContent = 'AI가 자세를 분석하고 있어요.';
@@ -569,42 +603,53 @@
             await tf.ready();
           }
 
-          // Teachable Machine의 이미지/포즈 모델을 각각 로딩합니다.
-          if (window.teachablemachine && window.teachablemachine.image) {
-            model = await tmImage.load(MODEL_URL, METADATA_URL);
-            modelType = 'image';
-          } else if (window.teachablemachine && window.teachablemachine.pose) {
+          const metadata = await fetch(METADATA_URL, { cache: 'no-store' }).then(async (response) => {
+            if (!response.ok) {
+              throw new Error('metadata.json을 불러오지 못했습니다.');
+            }
+            return response.json();
+          });
+
+          labels = Array.isArray(metadata.labels) ? metadata.labels : [];
+          const packageName = String(metadata.packageName || '').toLowerCase();
+
+          // 실제 metadata.json의 packageName을 확인해 pose 모델인지 image 모델인지 판단합니다.
+          // 현재 업로드된 모델은 pose 모델이므로 tmPose.load를 사용합니다.
+          if (packageName.includes('pose')) {
             model = await tmPose.load(MODEL_URL, METADATA_URL);
             modelType = 'pose';
+          } else if (packageName.includes('image')) {
+            model = await tmImage.load(MODEL_URL, METADATA_URL);
+            modelType = 'image';
           } else {
-            throw new Error('Teachable Machine 라이브러리가 준비되지 않았습니다.');
+            model = await tmPose.load(MODEL_URL, METADATA_URL);
+            modelType = 'pose';
           }
 
+          isModelLoaded = true;
           setModelStatus('AI 모델 준비 완료!', 'success');
+          updateAnalyzeButton();
         } catch (error) {
           console.error('모델 로딩 오류:', error);
-          setModelStatus('모델을 불러오지 못했어요. 잠시 후 다시 시도하거나 모델 파일이 있는지 확인해 주세요.', 'error');
+          isModelLoaded = false;
+          setModelStatus('모델을 불러오지 못했어요. 모델 파일이 같은 폴더에 있는지 확인해 주세요.', 'error');
         }
       }
 
       function getPredictionResult(predictionList) {
         if (!Array.isArray(predictionList) || predictionList.length === 0) {
-          return {
-            label: 'unknown',
-            probability: 0,
-            category: 'unknown'
-          };
+          return { label: 'unknown', probability: 0, category: 'unknown' };
         }
 
-        const sorted = [...predictionList].sort((a, b) => (b.probability || 0) - (a.probability || 0));
-        const best = sorted[0];
+        const ordered = [...predictionList].sort((a, b) => (b.probability || 0) - (a.probability || 0));
+        const best = ordered[0];
         const probability = Number(best.probability || 0);
-        const category = classCategoryFromLabel(best.className, predictionList.map(item => item.className));
+        const category = getCategoryFromLabel(best.className || best.className || 'unknown');
 
         return {
           label: best.className || 'unknown',
           probability,
-          category: category.category
+          category
         };
       }
 
@@ -613,8 +658,8 @@
         const percentageText = `${maxProbability.toFixed(1)}%`;
         const isHighConfidence = maxProbability >= 60;
 
-        resultTitle.textContent = '결과';
         resultImage.src = currentPreviewSrc || previewImage.src;
+        resetBtn.classList.remove('hidden');
 
         if (!isHighConfidence) {
           resultTitle.textContent = '잘 모르겠어요 🤔';
@@ -627,7 +672,7 @@
           return;
         }
 
-        // 60% 이상일 때는 실제 클래스 이름을 읽어 정확한 자세 메시지를 보여줍니다.
+        // 가장 높은 확률의 클래스를 실제 메타데이터 라벨과 연결하여 정확한 자세 피드백을 보여줍니다.
         if (result.category === 'correct') {
           resultTitle.textContent = '올바른 스쿼트 자세예요! 👍';
           resultTitle.className = 'result-good';
@@ -695,14 +740,7 @@
             imageElement.onerror = () => reject(new Error('이미지 로드 실패'));
           });
 
-          let prediction = [];
-
-          if (modelType === 'image') {
-            prediction = await model.predict(imageElement);
-          } else {
-            prediction = await model.predict(imageElement);
-          }
-
+          const prediction = await model.predict(imageElement);
           const result = getPredictionResult(prediction);
           renderResult(result);
           setModelStatus('AI 모델 준비 완료!', 'success');
@@ -710,13 +748,13 @@
           console.error('추론 오류:', error);
           setModelStatus('AI가 자세를 분석하지 못했어요. 사진을 다시 선택해 주세요.', 'error');
         } finally {
-          analyzeBtn.disabled = !currentPreviewSrc;
+          updateAnalyzeButton();
         }
       }
 
       function stopCameraStream() {
         if (videoStream) {
-          videoStream.getTracks().forEach(track => track.stop());
+          videoStream.getTracks().forEach((track) => track.stop());
           videoStream = null;
         }
         if (cameraVideo) {
@@ -735,7 +773,7 @@
 
           const constraints = {
             video: {
-              facingMode: cameraMode === 'environment' ? { ideal: 'environment' } : { ideal: 'user' },
+              facingMode: { ideal: 'environment' },
               width: { ideal: 1280 },
               height: { ideal: 720 }
             },
@@ -750,13 +788,14 @@
           retakeBtn.classList.remove('hidden');
           closeCameraBtn.classList.remove('hidden');
           cameraBtn.textContent = '카메라 다시 켜기';
-          selectedSource = 'camera';
         } catch (error) {
           console.error('카메라 접근 오류:', error);
           setModelStatus('카메라 사용이 거부되었어요. 카메라 접근을 허용하면 실시간 촬영을 할 수 있어요.', 'error');
           cameraBox.classList.add('hidden');
           cameraEmpty.classList.remove('hidden');
           captureBtn.classList.add('hidden');
+          retakeBtn.classList.add('hidden');
+          closeCameraBtn.classList.add('hidden');
         }
       }
 
@@ -788,7 +827,6 @@
         const dataUrl = canvas.toDataURL('image/png');
         resultPanel.classList.add('hidden');
         showPreviewImage(dataUrl);
-        selectedSource = 'camera';
       }
 
       function handleUploadedFile(file) {
@@ -801,7 +839,6 @@
         reader.onload = function (event) {
           resultPanel.classList.add('hidden');
           showPreviewImage(event.target.result);
-          selectedSource = 'upload';
           setModelStatus('사진이 준비됐어요. 자세 분석하기 버튼을 눌러 AI 판별을 시작해 주세요.');
         };
         reader.readAsDataURL(file);
@@ -812,7 +849,7 @@
         imageInput.click();
       });
 
-      imageInput.addEventListener('change', event => {
+      imageInput.addEventListener('change', (event) => {
         const file = event.target.files && event.target.files[0];
         handleUploadedFile(file);
       });
@@ -847,16 +884,15 @@
 
       resetBtn.addEventListener('click', () => {
         clearPreviewImage();
-        resultPanel.classList.add('hidden');
+        setResultDefaults();
         setModelStatus('AI 모델 준비 완료!', 'success');
       });
 
-      // 새로고침 시 사진과 결과를 초기화 합니다.
       window.addEventListener('beforeunload', () => {
         stopCameraStream();
       });
 
-      // 페이지가 로드되면 모델을 자동으로 준비합니다.
+      setResultDefaults();
       loadModel();
     </script>
   </body>
