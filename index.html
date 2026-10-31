@@ -20,12 +20,9 @@
         --shadow: 0 12px 28px rgba(38, 91, 135, 0.12);
       }
 
-      * {
-        box-sizing: border-box;
-      }
+      * { box-sizing: border-box; }
 
-      html,
-      body {
+      html, body {
         margin: 0;
         padding: 0;
         font-family: "Apple SD Gothic Neo", "Malgun Gothic", "NanumGothic", sans-serif;
@@ -102,13 +99,8 @@
         transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
       }
 
-      button:hover {
-        transform: translateY(-1px);
-      }
-
-      button:active {
-        transform: translateY(0);
-      }
+      button:hover { transform: translateY(-1px); }
+      button:active { transform: translateY(0); }
 
       .primary {
         background: linear-gradient(135deg, var(--primary) 0%, var(--primary-deep) 100%);
@@ -181,8 +173,7 @@
         color: #1f4d73;
       }
 
-      .camera-box,
-      .preview-box {
+      .camera-box, .preview-box {
         position: relative;
         min-height: 360px;
         border-radius: 18px;
@@ -194,8 +185,7 @@
         align-items: center;
       }
 
-      .camera-box video,
-      .preview-box img {
+      .camera-box video, .preview-box img {
         width: 100%;
         height: 100%;
         max-height: 420px;
@@ -211,9 +201,7 @@
         padding: 20px;
       }
 
-      .hidden {
-        display: none !important;
-      }
+      .hidden { display: none !important; }
 
       .analysis-actions {
         display: flex;
@@ -292,17 +280,9 @@
         color: var(--muted);
       }
 
-      .result-good {
-        color: var(--success);
-      }
-
-      .result-bad {
-        color: var(--danger);
-      }
-
-      .result-unknown {
-        color: var(--warning);
-      }
+      .result-good { color: var(--success); }
+      .result-bad { color: var(--danger); }
+      .result-unknown { color: var(--warning); }
 
       .probability-good {
         background: #eafff3;
@@ -324,33 +304,12 @@
       }
 
       @media (max-width: 760px) {
-        body {
-          padding: 14px;
-        }
-
-        .app {
-          padding: 16px 14px 22px;
-          border-radius: 20px;
-        }
-
-        .media-area,
-        .result-content {
-          grid-template-columns: 1fr;
-        }
-
-        .camera-box,
-        .preview-box {
-          min-height: 260px;
-        }
-
-        .control-panel,
-        .analysis-actions {
-          flex-direction: column;
-        }
-
-        button {
-          width: 100%;
-        }
+        body { padding: 14px; }
+        .app { padding: 16px 14px 22px; border-radius: 20px; }
+        .media-area, .result-content { grid-template-columns: 1fr; }
+        .camera-box, .preview-box { min-height: 260px; }
+        .control-panel, .analysis-actions { flex-direction: column; }
+        button { width: 100%; }
       }
     </style>
   </head>
@@ -375,7 +334,7 @@
         <input id="imageInput" type="file" accept="image/*" />
       </div>
 
-      <!-- 모델 준비 상태를 사용자에게 보여주는 영역입니다. -->
+      <!-- 모델 준비 상태 -->
       <div id="modelStatus" class="status-box" aria-live="polite">AI 모델을 준비하고 있어요!</div>
 
       <div class="media-area">
@@ -423,51 +382,31 @@
       </div>
     </div>
 
+    <!--
+      Teachable Machine 공식 문서의 CDN 조합:
+      - TensorFlow.js: https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js
+      - Teachable Machine Pose: https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8.3/dist/teachablemachine-pose.min.js
+      여기서 중요한 점은 전역 객체가 window.tmPose라는 점입니다.
+    -->
+    <script
+      src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"
+      onload="console.log('[Library] TensorFlow.js 로드 완료');"
+      onerror="console.error('[Library] TensorFlow.js 로드 실패');">
+    </script>
+
+    <script
+      src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8.3/dist/teachablemachine-pose.min.js"
+      onload="console.log('[Library] Teachable Machine Pose 로드 완료');"
+      onerror="console.error('[Library] Teachable Machine Pose 로드 실패');">
+    </script>
+
     <script>
-      // ------------------------------------------------------------
-      // 라이브러리 로딩 진단용 상태 관리
-      // ------------------------------------------------------------
-      window.libraryState = {
-        tfjs: false,
-        pose: false,
-        poseSource: null
-      };
+      console.log('[App] 버전 식별:', 'squat-discriminator-v1.0.0');
+      console.log('[App] 모델 경로:', './model.json');
+      console.log('[App] 메타데이터 경로:', './metadata.json');
 
-      function logLibraryStatus(name, ok, detail = '') {
-        const stateText = ok ? 'OK' : 'FAIL';
-        console.log(`[Library] ${name}: ${stateText}${detail ? ' - ' + detail : ''}`);
-      }
-
-      function loadScript(url, name) {
-        return new Promise((resolve, reject) => {
-          const script = document.createElement('script');
-          script.src = url;
-          script.async = true;
-
-          script.onload = () => {
-            window.libraryState[name] = true;
-            logLibraryStatus(name, true, url);
-            resolve();
-          };
-
-          script.onerror = () => {
-            window.libraryState[name] = false;
-            logLibraryStatus(name, false, url);
-            reject(new Error(`${name} script failed to load: ${url}`));
-          };
-
-          document.head.appendChild(script);
-        });
-      }
-
-      // 분석용 변수들
       const MODEL_URL = './model.json';
       const METADATA_URL = './metadata.json';
-      const APP_VERSION = 'squat-discriminator-v1.0.0';
-
-      console.log('[App] version:', APP_VERSION);
-      console.log('[App] model URL:', MODEL_URL);
-      console.log('[App] metadata URL:', METADATA_URL);
 
       const modelStatus = document.getElementById('modelStatus');
       const uploadBtn = document.getElementById('uploadBtn');
@@ -498,9 +437,6 @@
       let videoStream = null;
       let cameraMode = 'environment';
 
-      // ------------------------------------------------------------
-      // UI 상태 함수들
-      // ------------------------------------------------------------
       function setModelStatus(text, type = '') {
         modelStatus.textContent = text;
         modelStatus.className = 'status-box';
@@ -532,7 +468,7 @@
         updateAnalyzeButton();
       }
 
-      function resetResultScreen() {
+      function resetResultPanel() {
         resultPanel.classList.add('hidden');
         resultTitle.textContent = '결과';
         resultTitle.className = 'result-good';
@@ -542,11 +478,8 @@
         feedbackBox.classList.add('hidden');
       }
 
-      // ------------------------------------------------------------
-      // 메타데이터 라벨을 읽고 분류
-      // ------------------------------------------------------------
       function normalizeLabel(rawLabel) {
-        if (!rawLabel == null) return '';
+        if (rawLabel === null || rawLabel === undefined) return '';
         return String(rawLabel).trim().toLowerCase().replace(/\\s+/g, '');
       }
 
@@ -583,7 +516,10 @@
           return 'bad_knee';
         }
 
-        if (label.includes('벗윙크') || label.includes('buttwink')) {
+        if (
+          label.includes('벗윙크') ||
+          label.includes('buttwink')
+        ) {
           return 'bad_buttwink';
         }
 
@@ -686,137 +622,115 @@
         resultPanel.classList.remove('hidden');
       }
 
-      // ------------------------------------------------------------
-      // 모델 로딩
-      // ------------------------------------------------------------
       async function loadModel() {
         setModelStatus('AI 모델을 준비하고 있어요!');
 
         try {
+          console.log('[Model] TF 확인:', !!window.tf);
+          console.log('[Model] tmPose 확인:', !!window.tmPose);
+
           if (!window.tf) {
             throw new Error('TensorFlow.js가 로드되지 않았습니다. window.tf가 없습니다.');
           }
 
-          if (!window.teachablemachine || !window.teachablemachine.pose) {
-            throw new Error('Teachable Machine Pose 라이브러리가 로드되지 않았습니다. window.teachablemachine.pose가 없습니다.');
+          if (!window.tmPose) {
+            throw new Error('Teachable Machine Pose가 로드되지 않았습니다. window.tmPose가 없습니다.');
           }
 
-          // 메타데이터 파일을 읽어서 실제 클래스 라벨을 가져옵니다.
           const metadataResponse = await fetch(METADATA_URL);
           if (!metadataResponse.ok) {
             throw new Error('metadata.json을 불러오지 못했습니다.');
           }
+
           const metadata = await metadataResponse.json();
           labels = Array.isArray(metadata.labels) ? metadata.labels : [];
-          console.log('[Model] metadata labels:', labels);
+          console.log('[Model] 메타데이터 라벨:', labels);
 
           await window.tf.ready();
-          console.log('[Model] TensorFlow.js ready');
+          console.log('[Model] TensorFlow 준비 완료');
 
-          // 공식 전역 객체는 window.teachablemachine.pose 입니다.
-          model = await window.teachablemachine.pose.load(MODEL_URL, METADATA_URL);
+          model = await window.tmPose.load(MODEL_URL, METADATA_URL);
           modelReady = true;
-          console.log('[Model] model loaded successfully');
 
+          console.log('[Model] 모델 로딩 완료');
           setModelStatus('AI 모델 준비 완료!', 'success');
           updateAnalyzeButton();
         } catch (error) {
           modelReady = false;
           model = null;
-          console.error('[Model] loadModel failed:', error);
-          setModelStatus('모델을 불러오지 못했어요. 라이브러리 로딩 오류일 수 있습니다. 브라우저 콘솔에서 원인을 확인해 주세요.', 'error');
+          console.error('[Model] 로딩 실패:', error);
+          setModelStatus(
+            '모델을 불러오지 못했어요. 라이브러리 로딩 오류일 수 있습니다. 브라우저 콘솔을 확인해 주세요.',
+            'error'
+          );
         }
       }
 
-      function bootstrapLibraries() {
-        console.log('[App] bootstrapLibraries() 시작');
+      function initializeApp() {
+        console.log('[App] initializeApp() 호출됨');
+        console.log('[App] TF 전역 확인:', !!window.tf);
+        console.log('[App] tmPose 전역 확인:', !!window.tmPose);
 
-        const tfUrl = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js';
-        const poseCandidates = [
-          'https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8.3/dist/teachablemachine-pose.min.js',
-          'https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8.6/dist/teachablemachine-pose.min.js'
-        ];
-
-        // 두 라이브러리의 실행 순서를 보장합니다.
-        loadScript(tfUrl, 'tfjs')
-          .then(() => {
-            if (!window.tf) {
-              throw new Error('window.tf가 정의되지 않았습니다. TensorFlow.js 로딩 실패.');
-            }
-            console.log('[App] window.tf 확인됨:', !!window.tf);
-
-            // pose는 0.8.3을 먼저 시도하고, 실패하면 0.8.6을 시도합니다.
-            const tryPoseLoad = (index) => {
-              if (index >= poseCandidates.length) {
-                throw new Error('Teachable Machine Pose 라이브러리를 모두 불러오지 못했습니다.');
-              }
-
-              const candidateUrl = poseCandidates[index];
-              return loadScript(candidateUrl, 'pose')
-                .then(() => {
-                  if (window.teachablemachine && window.teachablemachine.pose) {
-                    console.log('[App] Pose 라이브러리 전역 확인됨:', !!window.teachablemachine.pose);
-                    window.libraryState.poseSource = candidateUrl;
-                    console.log('[App] 사용할 Pose CDN:', candidateUrl);
-                    return true;
-                  }
-
-                  console.warn('[App] 현재 Pose 후보가 전역을 만들지 못함:', candidateUrl);
-                  return tryPoseLoad(index + 1);
-                })
-                .catch(() => {
-                  console.warn('[App] Pose 로딩 실패, 다음 후보 시도:', poseCandidates[index + 1]);
-                  return tryPoseLoad(index + 1);
-                });
-            };
-
-            return tryPoseLoad(0);
-          })
-          .then(() => {
-            if (!window.teachablemachine || !window.teachablemachine.pose) {
-              throw new Error('window.teachablemachine.pose가 정의되지 않았습니다. Pose 라이브러리 로딩 실패.');
-            }
-
-            console.log('[App] 라이브러리 로딩 완료. 모델을 시작합니다.');
-            return loadModel();
-          })
-          .catch((error) => {
-            console.error('[App] 라이브러리 부팅 실패:', error);
-
-            if (!window.tf) {
-              setModelStatus('AI 라이브러리 로딩 오류: TensorFlow.js가 로드되지 않았습니다.', 'error');
-            } else if (!window.teachablemachine || !window.teachablemachine.pose) {
-              setModelStatus('AI 라이브러리 로딩 오류: Teachable Machine Pose가 로드되지 않았습니다. 브라우저 콘솔을 확인해 주세요.', 'error');
-            } else {
-              setModelStatus('AI 라이브러리 로딩 오류: 브라우저 콘솔을 확인해 주세요.', 'error');
-            }
-          });
-      }
-
-      // ------------------------------------------------------------
-      // 사진 업로드 관련
-      // ------------------------------------------------------------
-      function handleUploadedFile(file) {
-        if (!file || !file.type.startsWith('image/')) {
-          setModelStatus('이미지 파일만 선택할 수 있어요.', 'error');
+        if (!window.tf) {
+          console.error('[App] window.tf가 정의되지 않았습니다. TensorFlow.js 로딩 실패');
+          setModelStatus('AI 라이브러리 로딩 오류: TensorFlow.js가 로드되지 않았습니다.', 'error');
           return;
         }
 
-        const reader = new FileReader();
-        reader.onload = function (event) {
-          resultPanel.classList.add('hidden');
-          showPreviewImage(event.target.result);
-          setModelStatus('사진이 준비됐어요. 자세 분석하기 버튼을 눌러 AI 판별을 시작해 주세요.');
-        };
-        reader.readAsDataURL(file);
+        if (!window.tmPose) {
+          console.error('[App] window.tmPose가 정의되지 않았습니다. Pose 라이브러리 로딩 실패');
+          setModelStatus('AI 라이브러리 로딩 오류: Teachable Machine Pose가 로드되지 않았습니다. 브라우저 콘솔을 확인해 주세요.', 'error');
+          return;
+        }
+
+        console.log('[App] 라이브러리 확인 완료. 모델 로드 시작');
+        loadModel();
       }
 
-      // ------------------------------------------------------------
-      // 카메라 관련
-      // ------------------------------------------------------------
+      async function analyzeCurrentImage() {
+        if (!model || !modelReady) {
+          setModelStatus('모델이 아직 준비되지 않았어요. 잠시 후 다시 시도해 주세요.', 'error');
+          return;
+        }
+
+        if (!currentPreviewSrc) {
+          setModelStatus('먼저 사진을 선택하거나 카메라로 촬영해 주세요.', 'error');
+          return;
+        }
+
+        setModelStatus('AI가 스쿼트 자세를 살펴보고 있어요!');
+        analyzeBtn.disabled = true;
+
+        try {
+          const imageElement = document.createElement('img');
+          imageElement.src = currentPreviewSrc;
+          imageElement.crossOrigin = 'anonymous';
+
+          await new Promise((resolve, reject) => {
+            imageElement.onload = resolve;
+            imageElement.onerror = () => reject(new Error('이미지 로드 실패'));
+          });
+
+          // 포즈 모델의 공식 추론 순서
+          const { posenetOutput } = await model.estimatePose(imageElement);
+          const prediction = await model.predict(posenetOutput);
+
+          console.log('[Analyze] 추론 결과:', prediction);
+
+          const result = getPredictionResult(prediction);
+          renderResult(result);
+          setModelStatus('AI 모델 준비 완료!', 'success');
+        } catch (error) {
+          console.error('[Analyze] 추론 실패:', error);
+          setModelStatus('AI가 자세를 분석하지 못했어요. 사진을 다시 선택해 주세요.', 'error');
+        } finally {
+          updateAnalyzeButton();
+        }
+      }
+
       function stopCameraStream() {
         if (videoStream) {
-          videoStream.getTracks().forEach((track) => track.stop());
+          videoStream.getTracks().forEach(track => track.stop());
           videoStream = null;
         }
         if (cameraVideo) {
@@ -891,57 +805,21 @@
         showPreviewImage(dataUrl);
       }
 
-      // ------------------------------------------------------------
-      // AI 분석
-      // ------------------------------------------------------------
-      async function analyzeCurrentImage() {
-        if (!model || !modelReady) {
-          setModelStatus('모델이 아직 준비되지 않았어요. 잠시 후 다시 시도해 주세요.', 'error');
+      function handleUploadedFile(file) {
+        if (!file || !file.type.startsWith('image/')) {
+          setModelStatus('이미지 파일만 선택할 수 있어요.', 'error');
           return;
         }
 
-        if (!currentPreviewSrc) {
-          setModelStatus('먼저 사진을 선택하거나 카메라로 촬영해 주세요.', 'error');
-          return;
-        }
-
-        setModelStatus('AI가 스쿼트 자세를 살펴보고 있어요!');
-        analyzeBtn.disabled = true;
-
-        try {
-          const imageElement = document.createElement('img');
-          imageElement.src = currentPreviewSrc;
-          imageElement.crossOrigin = 'anonymous';
-
-          await new Promise((resolve, reject) => {
-            imageElement.onload = resolve;
-            imageElement.onerror = () => reject(new Error('이미지 로드 실패'));
-          });
-
-          // 포즈 모델: estimatePose()를 먼저 수행한 뒤, posenetOutput을 predict()에 넘깁니다.
-          const poseResult = await model.estimatePose(imageElement);
-          const posenetOutput = poseResult && poseResult.posenetOutput ? poseResult.posenetOutput : poseResult;
-
-          console.log('[Analyze] estimatePose returned:', poseResult);
-          console.log('[Analyze] posenetOutput:', posenetOutput);
-
-          const prediction = await model.predict(posenetOutput);
-          console.log('[Analyze] prediction result:', prediction);
-
-          const result = getPredictionResult(prediction);
-          renderResult(result);
-          setModelStatus('AI 모델 준비 완료!', 'success');
-        } catch (error) {
-          console.error('[Analyze] 추론 실패:', error);
-          setModelStatus('AI가 자세를 분석하지 못했어요. 사진을 다시 선택해 주세요.', 'error');
-        } finally {
-          updateAnalyzeButton();
-        }
+        const reader = new FileReader();
+        reader.onload = function (event) {
+          resultPanel.classList.add('hidden');
+          showPreviewImage(event.target.result);
+          setModelStatus('사진이 준비됐어요. 자세 분석하기 버튼을 눌러 AI 판별을 시작해 주세요.');
+        };
+        reader.readAsDataURL(file);
       }
 
-      // ------------------------------------------------------------
-      // 버튼 이벤트
-      // ------------------------------------------------------------
       uploadBtn.addEventListener('click', () => {
         closeCamera();
         imageInput.click();
@@ -982,23 +860,19 @@
 
       resetBtn.addEventListener('click', () => {
         clearPreviewImage();
-        resetResultScreen();
+        resetResultPanel();
         setModelStatus('AI 모델 준비 완료!', 'success');
       });
 
-      // 페이지가 닫힐 때 카메라를 정리합니다.
       window.addEventListener('beforeunload', () => {
         stopCameraStream();
       });
 
-      // 초기 상태 표시
-      resetResultScreen();
+      resetResultPanel();
       updateAnalyzeButton();
-      console.log('[App] 부트스트랩 시작');
-      console.log('[App] 예상 Pose 전역: window.teachablemachine.pose');
 
-      // 라이브러리를 로드하고, 로드가 완료된 뒤 모델을 불러옵니다.
-      bootstrapLibraries();
+      // 실제 라이브러리 전역 이름과 로딩 상태를 정확히 검사한 뒤 모델을 로드합니다.
+      initializeApp();
     </script>
   </body>
 </html>
