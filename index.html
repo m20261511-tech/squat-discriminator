@@ -373,7 +373,7 @@
         <input id="imageInput" type="file" accept="image/*" />
       </div>
 
-      <!-- 모델 준비 상태를 사용자에게 보여주는 영역입니다. -->
+      <!-- 모델 준비 상태 -->
       <div id="modelStatus" class="status-box" aria-live="polite">AI 모델을 준비하고 있어요!</div>
 
       <div class="media-area">
@@ -411,10 +411,12 @@
             <h3 id="resultTitle" class="result-good">결과</h3>
             <div id="probabilityBadge" class="probability probability-good">확률: 0%</div>
             <p id="resultDescription" class="description">AI가 자세를 분석하고 있어요.</p>
+
             <div id="feedbackBox" class="feedback-box hidden">
               <strong>교정 피드백</strong>
               <span id="feedbackText"></span>
             </div>
+
             <div class="notice">AI의 분석 결과는 실제 자세와 다를 수 있어요.</div>
           </div>
         </div>
@@ -422,16 +424,16 @@
     </div>
 
     <!--
-      [수정] Teachable Machine Pose 모델에 맞는 올바른 라이브러리 경로입니다.
-      - TensorFlow.js: 1.3.1
-      - Teachable Machine Pose: 0.8.6
-      - 이미지 모델 라이브러리(@teachablemachine/image)는 제거합니다.
+      핵심 수정 사항:
+      - TensorFlow.js와 Teachable Machine Pose 스크립트 경로를 고정합니다.
+      - 순서상 tfjs 먼저, pose 이후에 로드합니다.
+      - Pose 모델은 `tmPose` 전역 객체를 사용합니다.
     -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8.6/dist/teachablemachine-pose.min.js"></script>
 
     <script>
-      // 사용자 사진/카메라 입력을 저장하고 상태를 관리하는 변수들입니다.
+      // DOM 요소
       const modelStatus = document.getElementById('modelStatus');
       const uploadBtn = document.getElementById('uploadBtn');
       const imageInput = document.getElementById('imageInput');
@@ -457,34 +459,49 @@
       const MODEL_URL = './model.json';
       const METADATA_URL = './metadata.json';
       let model = null;
+      let modelLabels = [];
       let currentPreviewSrc = null;
       let videoStream = null;
       let cameraMode = 'environment';
 
-      // 메타데이터의 실제 클래스 이름을 기반으로 결과를 해석합니다.
       function normalizeLabel(label) {
         if (!label) return '';
         return String(label).trim().toLowerCase().replace(/\\s+/g, '');
       }
 
-      function classifyPoseLabel(rawLabel) {
+      // 실제 metadata.json의 라벨 이름을 기준으로 간단하게 분류합니다.
+      function classifyPoseLabel(rawLabel, labels = []) {
         const label = normalizeLabel(rawLabel);
+        const knownTexts = labels.map(normalizeLabel);
 
-        if (!label) return 'unknown';
+        if (!label && knownTexts.length === 0) {
+          return 'unknown';
+        }
 
-        if (label.includes('올바른') || label.includes('correct') || label.includes('good') || label.includes('정면') || label.includes('옆모습')) {
+        if (label.includes('올바른') || label.includes('correct') || label.includes('good')) {
           return 'correct';
         }
-
-        if (label.includes('허리') && label.includes('말림')) {
+        if ((label.includes('허리') && label.includes('말림')) || label.includes('backbend') || label.includes('허리말림')) {
           return 'bad_back';
         }
-
-        if ((label.includes('무릎') && label.includes('모임')) || label.includes('kneecollapse')) {
+        if ((label.includes('무릎') && label.includes('모임')) || label.includes('kneecollapse') || label.includes('무릎모임')) {
           return 'bad_knee';
         }
-
         if (label.includes('벗윙크') || label.includes('buttwink')) {
+          return 'bad_buttwink';
+        }
+
+        const text = knownTexts.join('|').toLowerCase();
+        if (text.includes('올바른') || text.includes('correct')) {
+          return 'correct';
+        }
+        if (text.includes('허리') && text.includes('말림')) {
+          return 'bad_back';
+        }
+        if (text.includes('무릎') && text.includes('모임')) {
+          return 'bad_knee';
+        }
+        if (text.includes('벗윙크')) {
           return 'bad_buttwink';
         }
 
@@ -499,7 +516,7 @@
         const sorted = [...predictionList].sort((a, b) => (b.probability || 0) - (a.probability || 0));
         const best = sorted[0];
         const probability = Number(best.probability || 0);
-        const category = classifyPoseLabel(best.className || 'unknown');
+        const category = classifyPoseLabel(best.className || 'unknown', modelLabels);
 
         return {
           label: best.className || 'unknown',
@@ -511,5 +528,351 @@
       function setModelStatus(text, type = '') {
         modelStatus.textContent = text;
         modelStatus.className = 'status-box';
-        if (type === 'error
-
+        if (type === 'error') modelStatus.classList.add('error');
+        if (type === 'success') modelStatus.classList.add('success');
+      }
+
+      function setResultDefaults() {
+        resultTitle.textContent = '결과';
+        resultTitle.className = 'result-good';
+        resultDescription.textContent = 'AI가 자세를 분석하고 있어요.';
+        probabilityBadge.className = 'probability probability-good';
+        probabilityBadge.textContent = '확률: 0%';
+        feedbackBox.classList.add('hidden');
+      }
+
+      function updateAnalyzeButton() {
+        analyzeBtn.disabled = !currentPreviewSrc;
+      }
+
+      function showPreviewImage(src) {
+        currentPreviewSrc = src;
+        previewImage.src = src;
+        previewImage.classList.remove('hidden');
+        previewEmpty.classList.add('hidden');
+        resultPanel.classList.add('hidden');
+        feedbackBox.classList.add('hidden');
+        updateAnalyzeButton();
+      }
+
+      function clearPreviewImage() {
+        previewImage.src = '';
+        previewImage.classList.add('hidden');
+        previewEmpty.classList.remove('hidden');
+        currentPreviewSrc = null;
+        resultPanel.classList.add('hidden');
+        feedbackBox.classList.add('hidden');
+        updateAnalyzeButton();
+      }
+
+      function renderResult(result) {
+        const maxProbability = Number(result.probability || 0) * 100;
+        const percentageText = `${maxProbability.toFixed(1)}%`;
+        const isHighConfidence = maxProbability >= 60;
+
+        resultTitle.textContent = '결과';
+        resultImage.src = currentPreviewSrc || previewImage.src;
+
+        if (!isHighConfidence) {
+          resultTitle.textContent = '잘 모르겠어요 🤔';
+          resultTitle.className = 'result-unknown';
+          resultDescription.textContent = '몸 전체가 잘 보이도록 다시 촬영해 주세요.';
+          probabilityBadge.className = 'probability probability-unknown';
+          probabilityBadge.textContent = `확률: ${percentageText}`;
+          feedbackBox.classList.add('hidden');
+          resultPanel.classList.remove('hidden');
+          return;
+        }
+
+        if (result.category === 'correct') {
+          resultTitle.textContent = '올바른 스쿼트 자세예요! 👍';
+          resultTitle.className = 'result-good';
+          resultDescription.textContent = '잘했어요! 지금처럼 바른 자세를 유지하며 운동해 보세요!';
+          probabilityBadge.className = 'probability probability-good';
+          probabilityBadge.textContent = `확률: ${percentageText}`;
+          feedbackBox.classList.add('hidden');
+        } else if (result.category === 'bad_back') {
+          resultTitle.textContent = '허리 말림이 발견되었어요!';
+          resultTitle.className = 'result-bad';
+          resultDescription.textContent = '허리 말림이 발견되었어요!';
+          probabilityBadge.className = 'probability probability-bad';
+          probabilityBadge.textContent = `확률: ${percentageText}`;
+          feedbackText.textContent = '올바른 스쿼트 팁: 허리를 곧게 세우고 척추 중립을 지켜보세요. 이때 주의할 점은 무릎은 발끝보다 과하게 나오면 안돼요!';
+          feedbackBox.classList.remove('hidden');
+        } else if (result.category === 'bad_buttwink') {
+          resultTitle.textContent = '벗윙크 자세가 발견되었어요!';
+          resultTitle.className = 'result-bad';
+          resultDescription.textContent = '벗윙크 자세가 발견되었어요!';
+          probabilityBadge.className = 'probability probability-bad';
+          probabilityBadge.textContent = `확률: ${percentageText}`;
+          feedbackText.textContent = '엉덩이가 너무 과하게 내려가지 않도록, 허리 아래가 너무 구부러지지 않게 주의해요. 이때 주의할 점은 무릎은 발끝보다 과하게 나오면 안돼요!';
+          feedbackBox.classList.remove('hidden');
+        } else if (result.category === 'bad_knee') {
+          resultTitle.textContent = '무릎이 안쪽으로 모이는 자세가 발견되었어요!';
+          resultTitle.className = 'result-bad';
+          resultDescription.textContent = '무릎이 안쪽으로 모이는 자세가 발견되었어요!';
+          probabilityBadge.className = 'probability probability-bad';
+          probabilityBadge.textContent = `확률: ${percentageText}`;
+          feedbackText.textContent = '무릎이 안쪽으로 모이지 않게, 발끝과 같은 방향으로 무릎이 벌어지도록 해요. 이때 주의할 점은 무릎은 발끝보다 과하게 나오면 안돼요!';
+          feedbackBox.classList.remove('hidden');
+        } else {
+          resultTitle.textContent = '잘 모르겠어요 🤔';
+          resultTitle.className = 'result-unknown';
+          resultDescription.textContent = '몸 전체가 잘 보이도록 다시 촬영해 주세요.';
+          probabilityBadge.className = 'probability probability-unknown';
+          probabilityBadge.textContent = `확률: ${percentageText}`;
+          feedbackBox.classList.add('hidden');
+        }
+
+        resultPanel.classList.remove('hidden');
+      }
+
+      // [핵심 수정]
+      // tmPose와 tf가 실제로 존재하는지 먼저 확인합니다.
+      function ensurePoseLibrariesReady() {
+        const missing = [];
+
+        if (typeof window.tf === 'undefined') {
+          missing.push('window.tf');
+        }
+
+        if (typeof window.tmPose === 'undefined') {
+          missing.push('window.tmPose');
+        }
+
+        if (missing.length > 0) {
+          const message = 'Teachable Machine Pose 라이브러리가 로드되지 않았습니다. 누락된 항목: ' + missing.join(', ');
+          console.error('[ModelLoad] ' + message);
+          throw new Error(message);
+        }
+      }
+
+      async function loadModel() {
+        setModelStatus('AI 모델을 준비하고 있어요!');
+
+        try {
+          ensurePoseLibrariesReady();
+
+          // 실제 metadata.json을 읽어서 라벨 목록을 저장합니다.
+          const response = await fetch(METADATA_URL);
+          if (!response.ok) {
+            throw new Error('metadata.json 로드 실패');
+          }
+          const metadata = await response.json();
+          modelLabels = Array.isArray(metadata.labels) ? metadata.labels : [];
+
+          await window.tf.ready();
+          console.log('[ModelLoad] TensorFlow.js 준비 완료');
+
+          // [핵심 수정]
+          // 포즈 모델은 tmPose.load()로 로딩합니다.
+          model = await tmPose.load(MODEL_URL, METADATA_URL);
+          setModelStatus('AI 모델 준비 완료!', 'success');
+          console.log('[ModelLoad] Pose 모델 로딩 성공');
+        } catch (error) {
+          console.error('[ModelLoad] 모델 로딩 실패:', error);
+          console.error('[ModelLoad] error.message:', error && error.message ? error.message : String(error));
+          setModelStatus(
+            '모델을 불러오지 못했어요. 파일 위치와 라이브러리 로딩 상태를 다시 확인해 주세요. 상세: ' + (error && error.message ? error.message : '알 수 없는 오류'),
+            'error'
+          );
+        }
+      }
+
+      function initializeApp() {
+        if (typeof window.tf !== 'undefined' && typeof window.tmPose !== 'undefined') {
+          loadModel();
+        } else {
+          console.warn('[ModelLoad] 라이브러리 로딩 대기 중...');
+        }
+      }
+
+      async function analyzeCurrentImage() {
+        if (!model) {
+          setModelStatus('모델이 아직 준비되지 않았어요. 잠시 후 다시 시도해 주세요.', 'error');
+          return;
+        }
+
+        if (!currentPreviewSrc) {
+          setModelStatus('먼저 사진을 선택하거나 카메라로 촬영해 주세요.', 'error');
+          return;
+        }
+
+        setModelStatus('AI가 스쿼트 자세를 살펴보고 있어요!');
+        analyzeBtn.disabled = true;
+
+        try {
+          const imageElement = document.createElement('img');
+          imageElement.src = currentPreviewSrc;
+          imageElement.crossOrigin = 'anonymous';
+
+          await new Promise((resolve, reject) => {
+            imageElement.onload = resolve;
+            imageElement.onerror = () => reject(new Error('이미지 로드 실패'));
+          });
+
+          // [핵심 수정]
+          // 포즈 모델은 먼저 estimatePose()를 한 뒤, predict(pose)로 확률을 계산합니다.
+          const pose = await model.estimatePose(imageElement);
+          const prediction = await model.predict(pose);
+
+          const result = getPredictionResult(prediction);
+          renderResult(result);
+          setModelStatus('AI 모델 준비 완료!', 'success');
+        } catch (error) {
+          console.error('[ModelPredict] 사진 분석 실패:', error);
+          console.error('[ModelPredict] error.message:', error && error.message ? error.message : String(error));
+          setModelStatus('AI가 자세를 분석하지 못했어요. 사진을 다시 선택해 주세요. 상세: ' + (error && error.message ? error.message : '알 수 없는 오류'), 'error');
+        } finally {
+          updateAnalyzeButton();
+        }
+      }
+
+      function stopCameraStream() {
+        if (videoStream) {
+          videoStream.getTracks().forEach(track => track.stop());
+          videoStream = null;
+        }
+
+        if (cameraVideo) {
+          cameraVideo.srcObject = null;
+        }
+      }
+
+      async function startCamera() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          setModelStatus('이 브라우저는 카메라를 사용할 수 없어요. 다른 브라우저를 사용해 주세요.', 'error');
+          return;
+        }
+
+        try {
+          stopCameraStream();
+
+          const constraints = {
+            video: {
+              facingMode: cameraMode === 'environment' ? { ideal: 'environment' } : { ideal: 'user' },
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
+            },
+            audio: false
+          };
+
+          videoStream = await navigator.mediaDevices.getUserMedia(constraints);
+          cameraVideo.srcObject = videoStream;
+          cameraBox.classList.remove('hidden');
+          cameraEmpty.classList.add('hidden');
+          captureBtn.classList.remove('hidden');
+          retakeBtn.classList.remove('hidden');
+          closeCameraBtn.classList.remove('hidden');
+          cameraBtn.textContent = '카메라 다시 켜기';
+        } catch (error) {
+          console.error('카메라 접근 오류:', error);
+          setModelStatus('카메라 사용이 거부되었어요. 카메라 접근을 허용하면 실시간 촬영을 할 수 있어요.', 'error');
+          cameraBox.classList.add('hidden');
+          cameraEmpty.classList.remove('hidden');
+          captureBtn.classList.add('hidden');
+          retakeBtn.classList.add('hidden');
+          closeCameraBtn.classList.add('hidden');
+        }
+      }
+
+      function closeCamera() {
+        stopCameraStream();
+        cameraBox.classList.add('hidden');
+        cameraEmpty.classList.remove('hidden');
+        captureBtn.classList.add('hidden');
+        retakeBtn.classList.add('hidden');
+        closeCameraBtn.classList.add('hidden');
+        cameraBtn.textContent = '카메라 켜기';
+      }
+
+      function captureCameraImage() {
+        if (!cameraVideo || !cameraVideo.videoWidth || !cameraVideo.videoHeight) {
+          setModelStatus('카메라 화면이 아직 준비되지 않았어요. 잠시 후 다시 시도해 주세요.', 'error');
+          return;
+        }
+
+        const canvas = document.createElement('canvas');
+        const width = cameraVideo.videoWidth;
+        const height = cameraVideo.videoHeight;
+        canvas.width = width;
+        canvas.height = height;
+
+        const context = canvas.getContext('2d');
+        context.drawImage(cameraVideo, 0, 0, width, height);
+
+        const dataUrl = canvas.toDataURL('image/png');
+        resultPanel.classList.add('hidden');
+        showPreviewImage(dataUrl);
+      }
+
+      function handleUploadedFile(file) {
+        if (!file || !file.type.startsWith('image/')) {
+          setModelStatus('이미지 파일만 선택할 수 있어요.', 'error');
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = function (event) {
+          resultPanel.classList.add('hidden');
+          showPreviewImage(event.target.result);
+          setModelStatus('사진이 준비됐어요. 자세 분석하기 버튼을 눌러 AI 판별을 시작해 주세요.');
+        };
+        reader.readAsDataURL(file);
+      }
+
+      uploadBtn.addEventListener('click', () => {
+        closeCamera();
+        imageInput.click();
+      });
+
+      imageInput.addEventListener('change', event => {
+        const file = event.target.files && event.target.files[0];
+        handleUploadedFile(file);
+      });
+
+      cameraBtn.addEventListener('click', async () => {
+        if (videoStream) {
+          closeCamera();
+        } else {
+          await startCamera();
+        }
+      });
+
+      captureBtn.addEventListener('click', () => {
+        if (videoStream) {
+          captureCameraImage();
+        }
+      });
+
+      retakeBtn.addEventListener('click', () => {
+        clearPreviewImage();
+        if (!videoStream) {
+          startCamera();
+        }
+      });
+
+      closeCameraBtn.addEventListener('click', () => {
+        closeCamera();
+        clearPreviewImage();
+      });
+
+      analyzeBtn.addEventListener('click', analyzeCurrentImage);
+
+      resetBtn.addEventListener('click', () => {
+        clearPreviewImage();
+        setResultDefaults();
+        setModelStatus('AI 모델 준비 완료!', 'success');
+      });
+
+      // 새로고침 시 사진과 결과를 초기화합니다.
+      window.addEventListener('beforeunload', () => {
+        stopCameraStream();
+      });
+
+      // 페이지 로드 직후 라이브러리 확인 후 모델을 준비합니다.
+      setResultDefaults();
+      initializeApp();
+    </script>
+  </body>
+</html>
